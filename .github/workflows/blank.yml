@@ -1,31 +1,40 @@
-mkdir -p .github/workflows
-cat > .github/workflows/build.yml << 'EOF'
 name: Build TWRP for PGGM10
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+  workflow_dispatch:  # 允许手动触发
 
 jobs:
   build:
     runs-on: ubuntu-20.04
+    env:
+      CCACHE_DIR: /tmp/ccache
+      USE_CCACHE: 1
+      CCACHE_EXEC: /usr/bin/ccache
+      ALLOW_MISSING_DEPENDENCIES: true
+
     steps:
-      - name: Checkout source
+      - name: Checkout device tree
         uses: actions/checkout@v3
 
-      - name: Setup environment
+      - name: Setup environment and sync TWRP source
         run: |
+          # 安装必要依赖
           sudo apt update
-          sudo apt install -y git repo openjdk-8-jdk-headless python python3 python-is-python3 \
-                              libncurses5-dev libssl-dev bc cpio ccache
-          # 同步极简 TWRP 源码（Android 12.1 分支，匹配骁龙 695 内核）
+          sudo apt install -y git repo openjdk-8-jdk-headless python3 python-is-python3 \
+                              libncurses5-dev libssl-dev bc cpio ccache p7zip-full
+
+          # 配置 ccache
+          ccache -M 20G
+
+          # 同步极简 TWRP 源码 (Android 12.1)
           mkdir -p ~/twrp
           cd ~/twrp
           repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b twrp-12.1 --depth=1
-          repo sync -j4
+          repo sync -c -j8 --fail-fast
 
-      - name: Prepare device tree
+      - name: Copy device tree into TWRP source
         run: |
           mkdir -p ~/twrp/device/oppo
           cp -r $GITHUB_WORKSPACE/device/oppo/PGGM10 ~/twrp/device/oppo/
@@ -33,14 +42,13 @@ jobs:
       - name: Build recovery image
         run: |
           cd ~/twrp
-          export ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh
           lunch twrp_PGGM10-eng
-          make -j$(nproc) recoveryimage
+          # 使用 -j4 避免内存不足（Actions 标配 7GB RAM，-j4 较稳妥）
+          make -j4 recoveryimage
 
       - name: Upload recovery image
         uses: actions/upload-artifact@v4
         with:
           name: recovery
           path: ~/twrp/out/target/product/PGGM10/recovery.img
-EOF

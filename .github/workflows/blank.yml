@@ -1,0 +1,46 @@
+mkdir -p .github/workflows
+cat > .github/workflows/build.yml << 'EOF'
+name: Build TWRP for PGGM10
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v3
+
+      - name: Setup environment
+        run: |
+          sudo apt update
+          sudo apt install -y git repo openjdk-8-jdk-headless python python3 python-is-python3 \
+                              libncurses5-dev libssl-dev bc cpio ccache
+          # 同步极简 TWRP 源码（Android 12.1 分支，匹配骁龙 695 内核）
+          mkdir -p ~/twrp
+          cd ~/twrp
+          repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b twrp-12.1 --depth=1
+          repo sync -j4
+
+      - name: Prepare device tree
+        run: |
+          mkdir -p ~/twrp/device/oppo
+          cp -r $GITHUB_WORKSPACE/device/oppo/PGGM10 ~/twrp/device/oppo/
+
+      - name: Build recovery image
+        run: |
+          cd ~/twrp
+          export ALLOW_MISSING_DEPENDENCIES=true
+          source build/envsetup.sh
+          lunch twrp_PGGM10-eng
+          make -j$(nproc) recoveryimage
+
+      - name: Upload recovery image
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery
+          path: ~/twrp/out/target/product/PGGM10/recovery.img
+EOF
